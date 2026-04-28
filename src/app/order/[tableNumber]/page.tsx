@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { getCategories, getMenuItems } from '@/lib/api/menu';
-import { useCartStore } from '@/stores/cartStore';
+import { useTableCart } from '@/hooks/useTableCart';
 import { formatKRW } from '@/lib/utils';
 import type { MenuCategory, MenuItem, MenuOption, MenuOptionChoice } from '@/types';
 import Button from '@/components/ui/Button';
@@ -81,24 +81,24 @@ type SelectedOptions = Record<string, string[]>; // optionId → [choiceId, ...]
 interface OptionModalProps {
   item: MenuItem | null;
   onClose: () => void;
-  onAddToCart: (item: MenuItem, selectedOptions: SelectedOptions, quantity: number) => void;
+  onAddToCart: (item: MenuItem, selectedOptions: SelectedOptions, quantity: number) => Promise<void>;
 }
 
 function OptionModal({ item, onClose, onAddToCart }: OptionModalProps) {
   const [selected, setSelected] = useState<SelectedOptions>({});
   const [quantity, setQuantity] = useState(1);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  // Reset state when item changes
   useEffect(() => {
     setSelected({});
     setQuantity(1);
     setValidationError(null);
+    setSubmitting(false);
   }, [item?.id]);
 
   if (!item) return null;
 
-  // Calculate option price delta
   const optionDelta = item.options.reduce((total, opt) => {
     const choiceIds = selected[opt.id] ?? [];
     return total + opt.choices
@@ -126,8 +126,8 @@ function OptionModal({ item, onClose, onAddToCart }: OptionModalProps) {
     setValidationError(null);
   }
 
-  function handleAddToCart() {
-    // Validate required options
+  async function handleAddToCart() {
+    if (!item) return;
     for (const opt of item.options) {
       if (opt.required) {
         const choices = selected[opt.id] ?? [];
@@ -137,7 +137,12 @@ function OptionModal({ item, onClose, onAddToCart }: OptionModalProps) {
         }
       }
     }
-    onAddToCart(item, selected, quantity);
+    setSubmitting(true);
+    try {
+      await onAddToCart(item, selected, quantity);
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -236,7 +241,7 @@ function OptionModal({ item, onClose, onAddToCart }: OptionModalProps) {
         <div className="flex items-center gap-3">
           <button
             onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-            disabled={quantity <= 1}
+            disabled={quantity <= 1 || submitting}
             className="w-10 h-10 rounded-full border border-border flex items-center justify-center text-lg font-medium transition-colors hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
             aria-label="수량 줄이기"
           >
@@ -245,7 +250,7 @@ function OptionModal({ item, onClose, onAddToCart }: OptionModalProps) {
           <span className="w-8 text-center font-semibold text-base tabular-nums">{quantity}</span>
           <button
             onClick={() => setQuantity((q) => Math.min(99, q + 1))}
-            disabled={quantity >= 99}
+            disabled={quantity >= 99 || submitting}
             className="w-10 h-10 rounded-full border border-border flex items-center justify-center text-lg font-medium transition-colors hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
             aria-label="수량 늘리기"
           >
@@ -254,7 +259,6 @@ function OptionModal({ item, onClose, onAddToCart }: OptionModalProps) {
         </div>
       </div>
 
-      {/* Total + CTA */}
       <div className="flex items-center justify-between mb-1">
         <span className="text-sm text-muted-foreground">합계</span>
         <span className="font-bold text-lg text-maroon-800">{formatKRW(totalPrice)}</span>
@@ -264,8 +268,9 @@ function OptionModal({ item, onClose, onAddToCart }: OptionModalProps) {
         size="lg"
         className="w-full mt-3"
         onClick={handleAddToCart}
+        disabled={submitting}
       >
-        장바구니 담기
+        {submitting ? '담는 중...' : '장바구니 담기'}
       </Button>
     </Modal>
   );
@@ -324,9 +329,10 @@ function MenuItemCard({ item, onTap }: MenuItemCardProps) {
 export default function OrderMenuPage() {
   const params = useParams();
   const router = useRouter();
-  const tableNumber = params.tableNumber as string;
+  const tableNumberStr = params.tableNumber as string;
+  const tableNumber = Number(tableNumberStr);
 
-  const { setTableNumber, addItem, getTotalCount, getTotalPrice } = useCartStore();
+  const cart = useTableCart(Number.isFinite(tableNumber) ? tableNumber : null);
 
   const [categories, setCategories] = useState<MenuCategory[]>([]);
   const [allItems, setAllItems] = useState<MenuItem[]>([]);
@@ -335,14 +341,6 @@ export default function OrderMenuPage() {
   const [selectedItem, setSelectedItem] = useState<MenuItem | null>(null);
 
   const tabsRef = useRef<HTMLDivElement>(null);
-
-  const totalCount = getTotalCount();
-  const totalPrice = getTotalPrice();
-
-  // Set table number on mount
-  useEffect(() => {
-    setTableNumber(Number(tableNumber));
-  }, [tableNumber, setTableNumber]);
 
   // Fetch menu data
   useEffect(() => {
@@ -373,7 +371,7 @@ export default function OrderMenuPage() {
     ? allItems.filter((item) => item.categoryId === activeCategoryId)
     : allItems;
 
-  function handleAddToCart(item: MenuItem, selectedOptions: SelectedOptions, quantity: number) {
+  async function handleAddToCart(item: MenuItem, selectedOptions: SelectedOptions, quantity: number) {
     const mapped = item.options.flatMap((opt) => {
       const choiceIds = selectedOptions[opt.id] ?? [];
       return opt.choices
@@ -385,7 +383,7 @@ export default function OrderMenuPage() {
         }));
     });
 
-    addItem({
+    await cart.addItem({
       menuItemId: item.id,
       menuItemName: item.name,
       basePrice: item.price,
@@ -403,7 +401,6 @@ export default function OrderMenuPage() {
           ref={tabsRef}
           className="hide-scrollbar flex overflow-x-auto px-4 gap-1 py-2"
         >
-          {/* 전체 tab */}
           <button
             data-active={activeCategoryId === null}
             onClick={() => setActiveCategoryId(null)}
@@ -432,6 +429,23 @@ export default function OrderMenuPage() {
           ))}
         </div>
       </div>
+
+      {/* Host indicator (always visible once SSE has connected) */}
+      {cart.ready && (
+        <div className="px-4 pt-3">
+          <div
+            className={`text-xs rounded-lg px-3 py-2 border ${
+              cart.isHost
+                ? 'bg-maroon-50 border-maroon-200 text-maroon-800'
+                : 'bg-muted border-border text-muted-foreground'
+            }`}
+          >
+            {cart.isHost
+              ? '이 기기가 호스트입니다 — 주문 확정은 여기서만 가능합니다.'
+              : '같은 테이블의 다른 기기가 호스트입니다. 메뉴 추가/수정은 자유롭게 가능하지만 주문 확정은 호스트가 진행합니다.'}
+          </div>
+        </div>
+      )}
 
       {/* Content */}
       {loading ? (
@@ -469,21 +483,21 @@ export default function OrderMenuPage() {
       />
 
       {/* Floating cart button */}
-      {totalCount > 0 && (
+      {cart.totalCount > 0 && (
         <div
           className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 w-full max-w-lg px-4"
         >
           <button
-            onClick={() => router.push(`/order/${tableNumber}/cart`)}
+            onClick={() => router.push(`/order/${tableNumberStr}/cart`)}
             className="w-full bg-maroon-800 text-white rounded-2xl shadow-2xl px-5 py-4 flex items-center justify-between active:scale-95 transition-transform"
           >
             <div className="flex items-center gap-2">
               <span className="bg-white text-maroon-800 rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold tabular-nums">
-                {totalCount}
+                {cart.totalCount}
               </span>
               <span className="font-semibold text-sm">장바구니 보기</span>
             </div>
-            <span className="font-bold text-base tabular-nums">{formatKRW(totalPrice)}</span>
+            <span className="font-bold text-base tabular-nums">{formatKRW(cart.totalPrice)}</span>
           </button>
         </div>
       )}

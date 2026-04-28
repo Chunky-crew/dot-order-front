@@ -1,4 +1,4 @@
-import type { MenuCategory, MenuItem, Order } from '@/types';
+import type { CartItem, MenuCategory, MenuItem, Order, TableCartSnapshot } from '@/types';
 
 const categories = new Map<string, MenuCategory>();
 const menuItems = new Map<string, MenuItem>();
@@ -216,4 +216,158 @@ export function getTableCount(): number {
 export function setTableCount(count: number): number {
   tableCount = count;
   return tableCount;
+}
+
+// ─── Shared Table Carts (collaborative, host-gated ordering) ────────────────
+
+interface TableCart {
+  items: CartItem[];
+  hostClientId: string | null;
+  hostLastSeen: number;
+  version: number;
+}
+
+const tableCarts = new Map<number, TableCart>();
+const HOST_GRACE_MS = 30_000;
+
+function getOrCreateCart(tableNumber: number): TableCart {
+  let cart = tableCarts.get(tableNumber);
+  if (!cart) {
+    cart = { items: [], hostClientId: null, hostLastSeen: 0, version: 0 };
+    tableCarts.set(tableNumber, cart);
+  }
+  return cart;
+}
+
+function snapshot(tableNumber: number, cart: TableCart): TableCartSnapshot {
+  const totalPrice = cart.items.reduce((s, i) => s + i.totalPrice, 0);
+  const totalCount = cart.items.reduce((s, i) => s + i.quantity, 0);
+  return {
+    tableNumber,
+    items: cart.items.map(it => ({ ...it, selectedOptions: [...it.selectedOptions] })),
+    hostClientId: cart.hostClientId,
+    version: cart.version,
+    totalPrice,
+    totalCount,
+  };
+}
+
+export function getTableCart(tableNumber: number): TableCartSnapshot {
+  return snapshot(tableNumber, getOrCreateCart(tableNumber));
+}
+
+/**
+ * Called when a client opens an SSE stream. Claims host if the table has none,
+ * or if the existing host has been gone past the grace period.
+ *
+ * `hostHasActiveConnection` is supplied by the route handler from the SSE bus
+ * so we don't introduce a circular import here.
+ */
+export function joinTableCart(
+  tableNumber: number,
+  clientId: string,
+  hostHasActiveConnection: () => boolean,
+): TableCartSnapshot {
+  const cart = getOrCreateCart(tableNumber);
+  const now = Date.now();
+  if (cart.hostClientId === clientId) {
+    cart.hostLastSeen = now;
+  } else if (cart.hostClientId === null) {
+    cart.hostClientId = clientId;
+    cart.hostLastSeen = now;
+    cart.version++;
+  } else {
+    const stale = !hostHasActiveConnection() && now - cart.hostLastSeen >= HOST_GRACE_MS;
+    if (stale) {
+      cart.hostClientId = clientId;
+      cart.hostLastSeen = now;
+      cart.version++;
+    }
+  }
+  return snapshot(tableNumber, cart);
+}
+
+/** Called when a client's SSE stream closes; starts the host-grace timer. */
+export function leaveTableCart(tableNumber: number, clientId: string): void {
+  const cart = tableCarts.get(tableNumber);
+  if (!cart) return;
+  if (cart.hostClientId === clientId) {
+    cart.hostLastSeen = Date.now();
+  }
+}
+
+export function addCartItemServer(
+  tableNumber: number,
+  data: Omit<CartItem, 'id' | 'totalPrice'>,
+  clientId?: string,
+): { item: CartItem; snap: TableCartSnapshot } {
+  const cart = getOrCreateCart(tableNumber);
+  // If a previous round just ended (host cleared by placeTableOrder), let the
+  // first mutator after that claim host so the next order can be confirmed.
+  if (cart.hostClientId === null && clientId) {
+    cart.hostClientId = clientId;
+    cart.hostLastSeen = Date.now();
+  }
+  const id = `cart-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const optionTotal = data.selectedOptions.reduce((s, o) => s + o.priceModifier, 0);
+  const totalPrice = (data.basePrice + optionTotal) * data.quantity;
+  const item: CartItem = { ...data, id, totalPrice };
+  cart.items.push(item);
+  cart.version++;
+  return { item, snap: snapshot(tableNumber, cart) };
+}
+
+export function updateCartItemQuantity(
+  tableNumber: number,
+  itemId: string,
+  quantity: number,
+): TableCartSnapshot | null {
+  const cart = tableCarts.get(tableNumber);
+  if (!cart) return null;
+  const idx = cart.items.findIndex(i => i.id === itemId);
+  if (idx < 0) return null;
+  if (quantity < 1) {
+    cart.items.splice(idx, 1);
+  } else {
+    const item = cart.items[idx];
+    const optTotal = item.selectedOptions.reduce((s, o) => s + o.priceModifier, 0);
+    const totalPrice = (item.basePrice + optTotal) * quantity;
+    cart.items[idx] = { ...item, quantity, totalPrice };
+  }
+  cart.version++;
+  return snapshot(tableNumber, cart);
+}
+
+export function removeCartItemServer(
+  tableNumber: number,
+  itemId: string,
+): TableCartSnapshot | null {
+  const cart = tableCarts.get(tableNumber);
+  if (!cart) return null;
+  const idx = cart.items.findIndex(i => i.id === itemId);
+  if (idx < 0) return null;
+  cart.items.splice(idx, 1);
+  cart.version++;
+  return snapshot(tableNumber, cart);
+}
+
+export type PlaceOrderResult =
+  | { ok: true; order: Order; snap: TableCartSnapshot }
+  | { ok: false; error: 'empty' | 'forbidden' | 'no-host' };
+
+/**
+ * Place the table's cart as an Order. Only the host may call this.
+ * On success, clears the cart and resets host so the next session can have a new host.
+ */
+export function placeTableOrder(tableNumber: number, clientId: string): PlaceOrderResult {
+  const cart = getOrCreateCart(tableNumber);
+  if (cart.items.length === 0) return { ok: false, error: 'empty' };
+  if (cart.hostClientId === null) return { ok: false, error: 'no-host' };
+  if (cart.hostClientId !== clientId) return { ok: false, error: 'forbidden' };
+  const order = createOrder({ tableNumber, items: cart.items });
+  cart.items = [];
+  cart.hostClientId = null;
+  cart.hostLastSeen = 0;
+  cart.version++;
+  return { ok: true, order, snap: snapshot(tableNumber, cart) };
 }

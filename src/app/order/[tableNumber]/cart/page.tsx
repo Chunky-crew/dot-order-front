@@ -1,9 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { useCartStore } from '@/stores/cartStore';
-import { createOrder } from '@/lib/api/orders';
+import { useTableCart } from '@/hooks/useTableCart';
 import { formatKRW } from '@/lib/utils';
 import Button from '@/components/ui/Button';
 import Modal from '@/components/ui/Modal';
@@ -12,25 +11,17 @@ import type { CartItem } from '@/types';
 export default function CartPage() {
   const params = useParams();
   const router = useRouter();
-  const tableNumber = params.tableNumber as string;
+  const tableNumberStr = params.tableNumber as string;
+  const tableNumber = Number(tableNumberStr);
 
-  const [mounted, setMounted] = useState(false);
+  const cart = useTableCart(Number.isFinite(tableNumber) ? tableNumber : null);
+
   const [showConfirm, setShowConfirm] = useState(false);
   const [isOrdering, setIsOrdering] = useState(false);
   const [orderError, setOrderError] = useState<string | null>(null);
   const [removeConfirmId, setRemoveConfirmId] = useState<string | null>(null);
 
-  const items = useCartStore((s) => s.items);
-  const updateQuantity = useCartStore((s) => s.updateQuantity);
-  const removeItem = useCartStore((s) => s.removeItem);
-  const clearCart = useCartStore((s) => s.clearCart);
-  const getTotalPrice = useCartStore((s) => s.getTotalPrice);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  if (!mounted) {
+  if (!cart.ready) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <div className="w-8 h-8 border-4 border-maroon-800 border-t-transparent rounded-full animate-spin" />
@@ -38,37 +29,34 @@ export default function CartPage() {
     );
   }
 
-  const totalPrice = getTotalPrice();
-  const totalCount = items.reduce((sum, i) => sum + i.quantity, 0);
+  const items = cart.items;
+  const totalPrice = cart.totalPrice;
+  const totalCount = cart.totalCount;
 
   async function handlePlaceOrder() {
     setIsOrdering(true);
     setOrderError(null);
-    try {
-      const order = await createOrder({
-        tableNumber: Number(tableNumber),
-        items,
-      });
-      clearCart();
-      setShowConfirm(false);
-      router.push(`/order/${tableNumber}/complete?orderId=${order.id}`);
-    } catch {
-      setOrderError('주문 처리 중 오류가 발생했습니다. 다시 시도해 주세요.');
+    const result = await cart.placeOrder();
+    if (!result.ok) {
+      setOrderError(result.error);
       setIsOrdering(false);
+      return;
     }
+    setShowConfirm(false);
+    router.push(`/order/${tableNumberStr}/complete?orderId=${encodeURIComponent(result.orderId)}`);
   }
 
   function handleDecrement(item: CartItem) {
     if (item.quantity === 1) {
       setRemoveConfirmId(item.id);
     } else {
-      updateQuantity(item.id, item.quantity - 1);
+      cart.updateQuantity(item.id, item.quantity - 1);
     }
   }
 
   function handleConfirmRemove() {
     if (removeConfirmId) {
-      removeItem(removeConfirmId);
+      cart.removeItem(removeConfirmId);
       setRemoveConfirmId(null);
     }
   }
@@ -91,7 +79,7 @@ export default function CartPage() {
           variant="primary"
           size="lg"
           className="w-full max-w-xs"
-          onClick={() => router.push(`/order/${tableNumber}`)}
+          onClick={() => router.push(`/order/${tableNumberStr}`)}
         >
           메뉴로 돌아가기
         </Button>
@@ -107,7 +95,7 @@ export default function CartPage() {
         {/* Back button / header */}
         <div className="sticky top-0 z-20 bg-white border-b border-border px-4 py-3 flex items-center gap-3">
           <button
-            onClick={() => router.push(`/order/${tableNumber}`)}
+            onClick={() => router.push(`/order/${tableNumberStr}`)}
             className="flex items-center justify-center w-10 h-10 -ml-1 rounded-full hover:bg-muted transition-colors"
             aria-label="뒤로가기"
           >
@@ -122,6 +110,19 @@ export default function CartPage() {
           <span className="ml-auto bg-maroon-800 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center">
             {totalCount}
           </span>
+        </div>
+
+        {/* Host status banner */}
+        <div
+          className={`mx-4 mt-3 rounded-lg border px-3 py-2 text-xs ${
+            cart.isHost
+              ? 'bg-maroon-50 border-maroon-200 text-maroon-800'
+              : 'bg-muted border-border text-muted-foreground'
+          }`}
+        >
+          {cart.isHost
+            ? '이 기기가 호스트입니다 — 주문 확정은 이 기기에서만 가능합니다.'
+            : '주문 확정은 호스트(첫 접속 기기)만 가능합니다. 메뉴 추가/수량 변경/삭제는 자유롭게 하실 수 있어요.'}
         </div>
 
         {/* Cart items */}
@@ -163,7 +164,7 @@ export default function CartPage() {
                     </button>
                     <span className="w-8 text-center font-semibold text-base tabular-nums">{item.quantity}</span>
                     <button
-                      onClick={() => updateQuantity(item.id, item.quantity + 1)}
+                      onClick={() => cart.updateQuantity(item.id, item.quantity + 1)}
                       className="w-8 h-8 rounded-full border border-border flex items-center justify-center text-foreground hover:bg-muted active:scale-95 transition-all"
                       aria-label="수량 늘리기"
                     >
@@ -211,22 +212,28 @@ export default function CartPage() {
         </div>
       </div>
 
-      {/* Fixed order button */}
+      {/* Fixed order button — host only */}
       <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-lg px-4 pb-safe-bottom bg-white border-t border-border pt-3 pb-4 z-30">
-        <button
-          onClick={() => setShowConfirm(true)}
-          disabled={isOrdering || items.length === 0}
-          className="w-full h-14 rounded-xl bg-maroon-800 text-white font-bold text-lg flex items-center justify-center gap-2 shadow-lg active:bg-maroon-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
-          {isOrdering ? (
-            <>
-              <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              <span>주문 처리 중...</span>
-            </>
-          ) : (
-            <span>{formatKRW(totalPrice)} 주문하기</span>
-          )}
-        </button>
+        {cart.isHost ? (
+          <button
+            onClick={() => setShowConfirm(true)}
+            disabled={isOrdering || items.length === 0}
+            className="w-full h-14 rounded-xl bg-maroon-800 text-white font-bold text-lg flex items-center justify-center gap-2 shadow-lg active:bg-maroon-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {isOrdering ? (
+              <>
+                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                <span>주문 처리 중...</span>
+              </>
+            ) : (
+              <span>{formatKRW(totalPrice)} 주문하기</span>
+            )}
+          </button>
+        ) : (
+          <div className="w-full h-14 rounded-xl bg-muted text-muted-foreground font-medium text-sm flex items-center justify-center text-center px-3">
+            주문 확정은 호스트(첫 접속 기기)에서만 가능합니다.
+          </div>
+        )}
       </div>
 
       {/* Order confirmation modal */}
@@ -238,7 +245,6 @@ export default function CartPage() {
         <div className="space-y-4">
           <p className="text-base text-foreground">주문을 확정하시겠습니까?</p>
 
-          {/* Mini order summary inside modal */}
           <div className="rounded-lg bg-muted p-3 space-y-1.5">
             {items.map((item) => (
               <div key={item.id} className="flex justify-between text-sm">

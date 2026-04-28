@@ -55,3 +55,12 @@ export interface Order {
   status: 'pending' | 'preparing' | 'completed';
   createdAt: string;
 }
+
+export interface TableCartSnapshot {
+  tableNumber: number;
+  items: CartItem[];
+  hostClientId: string | null;
+  version: number;
+  totalPrice: number;
+  totalCount: number;
+}
