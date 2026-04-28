@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import Image from 'next/image';
 import Button from '@/components/ui/Button';
 import Modal from '@/components/ui/Modal';
 import Badge from '@/components/ui/Badge';
@@ -667,14 +668,13 @@ function MenuItemCard({ item, categoryName, onEdit, onDelete }: MenuItemCardProp
     <div className="bg-white rounded-xl border border-border overflow-hidden flex flex-col shadow-sm hover:shadow-md transition-shadow">
       {/* Image */}
       {item.image ? (
-        <div className="h-36 bg-muted overflow-hidden shrink-0">
-          <img
+        <div className="relative h-36 bg-muted overflow-hidden shrink-0">
+          <Image
             src={item.image}
             alt={item.name}
-            className="w-full h-full object-cover"
-            onError={(e) => {
-              (e.currentTarget as HTMLImageElement).style.display = 'none';
-            }}
+            fill
+            className="object-cover"
+            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
           />
         </div>
       ) : (
