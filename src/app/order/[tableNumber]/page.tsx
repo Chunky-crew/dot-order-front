@@ -157,6 +157,7 @@ function OptionModal({ item, onClose, onAddToCart }: OptionModalProps) {
               width={80}
               height={80}
               className="w-full h-full object-cover"
+              unoptimized={item.image.startsWith('data:')}
             />
           ) : (
             <ImagePlaceholder name={item.name} />
@@ -303,6 +304,7 @@ function MenuItemCard({ item, onTap }: MenuItemCardProps) {
             fill
             className={`object-cover ${item.soldOut ? 'grayscale' : ''}`}
             sizes="(max-width: 512px) 50vw, 256px"
+            unoptimized={item.image.startsWith('data:')}
           />
         ) : (
           <ImagePlaceholder name={item.name} />

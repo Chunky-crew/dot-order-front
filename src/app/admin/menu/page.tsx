@@ -1,7 +1,187 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Image from 'next/image';
+import Cropper from 'react-easy-crop';
+import type { Area } from 'react-easy-crop';
+
+// ─── Image processing ────────────────────────────────────────────────────────
+
+const MAX_IMAGE_DIMENSION = 800;
+const IMAGE_QUALITY = 0.85;
+
+async function readImageAsDataURL(file: File): Promise<string> {
+  if (!file.type.startsWith('image/')) {
+    throw new Error('이미지 파일만 업로드할 수 있습니다.');
+  }
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error('파일을 읽을 수 없습니다.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function uploadMenuImage(dataUrl: string): Promise<string> {
+  const res = await fetch('/api/uploads/menu', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dataUrl }),
+  });
+  if (!res.ok) {
+    const message = await res
+      .json()
+      .then((b) => (b as { error?: string }).error)
+      .catch(() => null);
+    throw new Error(message ?? `업로드 실패 (${res.status})`);
+  }
+  const body = (await res.json()) as { url: string };
+  return body.url;
+}
+
+async function getCroppedDataURL(
+  imageSrc: string,
+  pixelCrop: Area,
+  maxDim = MAX_IMAGE_DIMENSION,
+  quality = IMAGE_QUALITY
+): Promise<string> {
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new window.Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error('이미지를 불러올 수 없습니다.'));
+    el.src = imageSrc;
+  });
+  let outW = pixelCrop.width;
+  let outH = pixelCrop.height;
+  if (outW > maxDim || outH > maxDim) {
+    const ratio = Math.min(maxDim / outW, maxDim / outH);
+    outW = Math.round(outW * ratio);
+    outH = Math.round(outH * ratio);
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = outW;
+  canvas.height = outH;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('이미지 처리에 실패했습니다.');
+  ctx.drawImage(
+    img,
+    pixelCrop.x,
+    pixelCrop.y,
+    pixelCrop.width,
+    pixelCrop.height,
+    0,
+    0,
+    outW,
+    outH
+  );
+  return canvas.toDataURL('image/jpeg', quality);
+}
+
+// ─── Image Crop Modal ────────────────────────────────────────────────────────
+
+interface ImageCropModalProps {
+  src: string;
+  onCancel: () => void;
+  onApply: (dataUrl: string) => void;
+}
+
+function ImageCropModal({ src, onCancel, onApply }: ImageCropModalProps) {
+  const [crop, setCrop] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
+  const [applying, setApplying] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleCropComplete = useCallback((_area: Area, areaPx: Area) => {
+    setCroppedAreaPixels(areaPx);
+  }, []);
+
+  async function handleApply() {
+    if (!croppedAreaPixels) return;
+    setApplying(true);
+    setError(null);
+    try {
+      const dataUrl = await getCroppedDataURL(src, croppedAreaPixels);
+      const url = await uploadMenuImage(dataUrl);
+      onApply(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '이미지 처리에 실패했습니다.');
+      setApplying(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !applying) onCancel();
+      }}
+    >
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg flex flex-col max-h-[90vh]">
+        <div className="flex items-center justify-between p-4 border-b border-border">
+          <h2 className="text-lg font-semibold">이미지 영역 조정</h2>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={applying}
+            className="text-muted-foreground hover:text-foreground text-xl leading-none disabled:opacity-50"
+            aria-label="닫기"
+          >
+            &times;
+          </button>
+        </div>
+
+        <div className="relative w-full aspect-square bg-black">
+          <Cropper
+            image={src}
+            crop={crop}
+            zoom={zoom}
+            aspect={1}
+            onCropChange={setCrop}
+            onZoomChange={setZoom}
+            onCropComplete={handleCropComplete}
+            showGrid
+          />
+        </div>
+
+        <div className="p-4 space-y-3 border-t border-border">
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-muted-foreground shrink-0 w-8">줌</span>
+            <input
+              type="range"
+              min={1}
+              max={3}
+              step={0.01}
+              value={zoom}
+              onChange={(e) => setZoom(Number(e.target.value))}
+              className="flex-1 accent-maroon-800"
+              aria-label="이미지 줌"
+            />
+            <span className="text-xs text-muted-foreground w-10 text-right">
+              {zoom.toFixed(1)}x
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            드래그로 위치 조정 · 슬라이더/휠로 줌 · 적용 시 {MAX_IMAGE_DIMENSION}px 이내로 압축됩니다.
+          </p>
+          {error && <p className="text-xs text-red-600">{error}</p>}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button type="button" variant="secondary" onClick={onCancel} disabled={applying}>
+              취소
+            </Button>
+            <Button
+              type="button"
+              onClick={handleApply}
+              disabled={applying || !croppedAreaPixels}
+            >
+              {applying ? '처리 중...' : '적용'}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 import Button from '@/components/ui/Button';
 import Modal from '@/components/ui/Modal';
 import Badge from '@/components/ui/Badge';
@@ -291,6 +471,72 @@ function MenuItemModal({
     options: [],
   });
   const [saving, setSaving] = useState(false);
+  const [imageProcessing, setImageProcessing] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [cropSrc, setCropSrc] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function applyImageFile(file: File | undefined) {
+    if (!file) return;
+    setImageProcessing(true);
+    setImageError(null);
+    try {
+      const dataUrl = await readImageAsDataURL(file);
+      setCropSrc(dataUrl);
+    } catch (err) {
+      setImageError(err instanceof Error ? err.message : '이미지 처리에 실패했습니다.');
+    } finally {
+      setImageProcessing(false);
+    }
+  }
+
+  function handleCropApply(dataUrl: string) {
+    setForm((f) => ({ ...f, image: dataUrl }));
+    setCropSrc(null);
+  }
+
+  function handleCropCancel() {
+    setCropSrc(null);
+  }
+
+  function handleEditCurrentImage() {
+    if (form.image) setCropSrc(form.image);
+  }
+
+  async function handleImageFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    await applyImageFile(file);
+  }
+
+  function handleRemoveImage() {
+    setForm((f) => ({ ...f, image: '' }));
+    setImageError(null);
+  }
+
+  function handleDragOver(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    if (imageProcessing) return;
+    setIsDragOver(true);
+  }
+
+  function handleDragLeave(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setIsDragOver(false);
+  }
+
+  async function handleDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setIsDragOver(false);
+    if (imageProcessing) return;
+    await applyImageFile(e.dataTransfer.files?.[0]);
+  }
+
+  function openFilePicker() {
+    if (imageProcessing) return;
+    fileInputRef.current?.click();
+  }
 
   useEffect(() => {
     if (isOpen) {
@@ -315,6 +561,10 @@ function MenuItemModal({
               options: [],
             }
       );
+      setImageError(null);
+      setImageProcessing(false);
+      setIsDragOver(false);
+      setCropSrc(null);
     }
   }, [isOpen, editing, defaultCategoryId]);
 
@@ -376,12 +626,107 @@ function MenuItemModal({
           onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
           placeholder="메뉴 설명을 입력하세요."
         />
-        <Input
-          label="이미지 URL"
-          value={form.image}
-          onChange={(e) => setForm((f) => ({ ...f, image: e.target.value }))}
-          placeholder="https://..."
-        />
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium text-foreground">메뉴 이미지</label>
+          <div
+            onClick={openFilePicker}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                openFilePicker();
+              }
+            }}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            role="button"
+            tabIndex={0}
+            aria-label={form.image ? '이미지 변경' : '이미지 업로드'}
+            className={`group relative w-full aspect-video rounded-lg border-2 overflow-hidden transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-maroon-800/30 ${
+              imageProcessing ? 'cursor-wait' : 'cursor-pointer'
+            } ${
+              isDragOver
+                ? 'border-solid border-maroon-800 bg-maroon-50'
+                : form.image
+                  ? 'border-solid border-border bg-muted'
+                  : 'border-dashed border-border bg-muted hover:border-maroon-400 hover:bg-maroon-50/40'
+            }`}
+          >
+            {form.image ? (
+              <>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={form.image}
+                  alt="메뉴 이미지 미리보기"
+                  className="w-full h-full object-cover"
+                />
+                {/* hover overlay */}
+                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition pointer-events-none group-hover:pointer-events-auto">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openFilePicker();
+                    }}
+                    disabled={imageProcessing}
+                    className="px-3 py-1.5 rounded-md bg-white/95 hover:bg-white text-foreground text-xs font-medium shadow disabled:opacity-60"
+                  >
+                    이미지 변경
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleEditCurrentImage();
+                    }}
+                    disabled={imageProcessing}
+                    className="px-3 py-1.5 rounded-md bg-white/95 hover:bg-white text-foreground text-xs font-medium shadow disabled:opacity-60"
+                  >
+                    영역 조정
+                  </button>
+                </div>
+                {/* remove button */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleRemoveImage();
+                  }}
+                  disabled={imageProcessing}
+                  className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/60 text-white hover:bg-red-600 flex items-center justify-center text-lg leading-none transition-colors"
+                  aria-label="이미지 제거"
+                >
+                  ×
+                </button>
+              </>
+            ) : (
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-center gap-1.5 p-4 pointer-events-none">
+                <span className="text-4xl">🖼️</span>
+                <p className="text-sm font-medium text-foreground">
+                  클릭하거나 이미지를 드래그하세요
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  PNG, JPG · 최대 {MAX_IMAGE_DIMENSION}px로 자동 압축
+                </p>
+              </div>
+            )}
+            {imageProcessing && (
+              <div className="absolute inset-0 bg-white/75 backdrop-blur-[1px] flex items-center justify-center pointer-events-none">
+                <span className="text-sm font-medium text-foreground">처리 중...</span>
+              </div>
+            )}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleImageFileChange}
+              className="hidden"
+            />
+          </div>
+          {imageError && (
+            <p className="text-xs text-red-600">{imageError}</p>
+          )}
+        </div>
         <label className="flex items-center gap-2 text-sm font-medium text-foreground cursor-pointer">
           <input
             type="checkbox"
@@ -403,11 +748,19 @@ function MenuItemModal({
           <Button type="button" variant="secondary" onClick={onClose}>
             취소
           </Button>
-          <Button type="submit" disabled={saving}>
+          <Button type="submit" disabled={saving || imageProcessing}>
             {saving ? '저장 중...' : '저장'}
           </Button>
         </div>
       </form>
+
+      {cropSrc && (
+        <ImageCropModal
+          src={cropSrc}
+          onApply={handleCropApply}
+          onCancel={handleCropCancel}
+        />
+      )}
     </Modal>
   );
 }
@@ -675,11 +1028,12 @@ function MenuItemCard({ item, categoryName, onEdit, onDelete }: MenuItemCardProp
             fill
             className="object-cover"
             sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+            unoptimized={item.image.startsWith('data:')}
           />
         </div>
       ) : (
         <div className="h-36 bg-muted flex items-center justify-center shrink-0">
-          <span className="text-3xl">☕</span>
+          <span className="text-sm text-muted-foreground">이미지 없음</span>
         </div>
       )}
 

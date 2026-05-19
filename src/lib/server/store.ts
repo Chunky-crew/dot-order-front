@@ -1,3 +1,5 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import type { CartItem, MenuCategory, MenuItem, Order, TableCartSnapshot } from '@/types';
 
 const categories = new Map<string, MenuCategory>();
@@ -5,6 +7,59 @@ const menuItems = new Map<string, MenuItem>();
 const orders = new Map<string, Order>();
 let tableCount = 8;
 let orderCounter = 0;
+
+// ─── Persistence ─────────────────────────────────────────────────────────────
+// Cart state (tableCarts, host info) is intentionally NOT persisted — it's
+// runtime session state tied to live SSE connections.
+
+const DATA_DIR = path.join(process.cwd(), 'data');
+const STORE_FILE = path.join(DATA_DIR, 'store.json');
+
+interface PersistedState {
+  categories: MenuCategory[];
+  menuItems: MenuItem[];
+  orders: Order[];
+  tableCount: number;
+  orderCounter: number;
+}
+
+function loadFromDisk(): PersistedState | null {
+  if (!existsSync(STORE_FILE)) return null;
+  try {
+    const raw = readFileSync(STORE_FILE, 'utf-8');
+    return JSON.parse(raw) as PersistedState;
+  } catch (err) {
+    console.warn('[store] failed to load store.json, falling back to seed:', err);
+    return null;
+  }
+}
+
+function persist() {
+  try {
+    if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
+    const state: PersistedState = {
+      categories: Array.from(categories.values()),
+      menuItems: Array.from(menuItems.values()),
+      orders: Array.from(orders.values()),
+      tableCount,
+      orderCounter,
+    };
+    writeFileSync(STORE_FILE, JSON.stringify(state, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('[store] failed to persist store.json:', err);
+  }
+}
+
+function hydrate(state: PersistedState) {
+  categories.clear();
+  menuItems.clear();
+  orders.clear();
+  state.categories.forEach(c => categories.set(c.id, c));
+  state.menuItems.forEach(i => menuItems.set(i.id, i));
+  state.orders.forEach(o => orders.set(o.id, o));
+  tableCount = state.tableCount;
+  orderCounter = state.orderCounter;
+}
 
 function seed() {
   if (categories.size > 0) return;
@@ -19,7 +74,7 @@ function seed() {
   const items: MenuItem[] = [
     {
       id: 'item-1', categoryId: 'cat-1', name: '아메리카노', price: 4000,
-      image: '/images/menu/americano.jpg', description: '깊고 진한 에스프레소에 물을 더한 클래식 커피',
+      image: '', description: '깊고 진한 에스프레소에 물을 더한 클래식 커피',
       soldOut: false,
       options: [
         { id: 'opt-1', name: '온도', type: 'radio', required: true, choices: [
@@ -34,7 +89,7 @@ function seed() {
     },
     {
       id: 'item-2', categoryId: 'cat-1', name: '카페라떼', price: 4500,
-      image: '/images/menu/latte.jpg', description: '부드러운 우유와 에스프레소의 조화',
+      image: '', description: '부드러운 우유와 에스프레소의 조화',
       soldOut: false,
       options: [
         { id: 'opt-3', name: '온도', type: 'radio', required: true, choices: [
@@ -49,7 +104,7 @@ function seed() {
     },
     {
       id: 'item-3', categoryId: 'cat-1', name: '바닐라라떼', price: 5000,
-      image: '/images/menu/vanilla-latte.jpg', description: '달콤한 바닐라 시럽이 들어간 라떼',
+      image: '', description: '달콤한 바닐라 시럽이 들어간 라떼',
       soldOut: false,
       options: [
         { id: 'opt-5', name: '온도', type: 'radio', required: true, choices: [
@@ -60,7 +115,7 @@ function seed() {
     },
     {
       id: 'item-4', categoryId: 'cat-1', name: '카푸치노', price: 4500,
-      image: '/images/menu/cappuccino.jpg', description: '풍성한 우유 거품의 이탈리아 정통 커피',
+      image: '', description: '풍성한 우유 거품의 이탈리아 정통 커피',
       soldOut: false,
       options: [
         { id: 'opt-6', name: '사이즈', type: 'radio', required: true, choices: [
@@ -71,7 +126,7 @@ function seed() {
     },
     {
       id: 'item-5', categoryId: 'cat-2', name: '녹차라떼', price: 5000,
-      image: '/images/menu/green-tea.jpg', description: '진한 말차와 부드러운 우유의 만남',
+      image: '', description: '진한 말차와 부드러운 우유의 만남',
       soldOut: false,
       options: [
         { id: 'opt-7', name: '온도', type: 'radio', required: true, choices: [
@@ -82,7 +137,7 @@ function seed() {
     },
     {
       id: 'item-6', categoryId: 'cat-2', name: '자몽에이드', price: 5500,
-      image: '/images/menu/grapefruit.jpg', description: '상큼한 자몽과 탄산의 시원한 조합',
+      image: '', description: '상큼한 자몽과 탄산의 시원한 조합',
       soldOut: false,
       options: [
         { id: 'opt-8', name: '토핑', type: 'checkbox', required: false, choices: [
@@ -93,25 +148,25 @@ function seed() {
     },
     {
       id: 'item-7', categoryId: 'cat-2', name: '레몬에이드', price: 5000,
-      image: '/images/menu/lemonade.jpg', description: '새콤달콤한 수제 레몬에이드',
+      image: '', description: '새콤달콤한 수제 레몬에이드',
       soldOut: false,
       options: [],
     },
     {
       id: 'item-8', categoryId: 'cat-3', name: '크로와상', price: 3500,
-      image: '/images/menu/croissant.jpg', description: '바삭하고 버터향 가득한 프랑스식 크로와상',
+      image: '', description: '바삭하고 버터향 가득한 프랑스식 크로와상',
       soldOut: false,
       options: [],
     },
     {
       id: 'item-9', categoryId: 'cat-3', name: '초코 머핀', price: 3800,
-      image: '/images/menu/muffin.jpg', description: '진한 초콜릿이 가득한 촉촉한 머핀',
+      image: '', description: '진한 초콜릿이 가득한 촉촉한 머핀',
       soldOut: false,
       options: [],
     },
     {
       id: 'item-10', categoryId: 'cat-3', name: '치즈케이크', price: 5500,
-      image: '/images/menu/cheesecake.jpg', description: '부드럽고 진한 뉴욕 스타일 치즈케이크',
+      image: '', description: '부드럽고 진한 뉴욕 스타일 치즈케이크',
       soldOut: true,
       options: [],
     },
@@ -119,7 +174,30 @@ function seed() {
   items.forEach(i => menuItems.set(i.id, i));
 }
 
-seed();
+function cleanupOrphanMenuItems(): boolean {
+  let changed = false;
+  for (const [itemId, item] of menuItems) {
+    if (!categories.has(item.categoryId)) {
+      menuItems.delete(itemId);
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+// Initialize: prefer persisted state, fall back to seed
+{
+  const loaded = loadFromDisk();
+  if (loaded) {
+    hydrate(loaded);
+    // Clean up any orphan menu items left behind by older (pre-cascade)
+    // category deletes so they stop leaking into "전체 메뉴".
+    if (cleanupOrphanMenuItems()) persist();
+  } else {
+    seed();
+    persist();
+  }
+}
 
 // Categories
 export function getAllCategories(): MenuCategory[] {
@@ -130,6 +208,7 @@ export function createCategory(data: Omit<MenuCategory, 'id'>): MenuCategory {
   const id = `cat-${Date.now()}`;
   const category: MenuCategory = { id, ...data };
   categories.set(id, category);
+  persist();
   return category;
 }
 
@@ -138,11 +217,20 @@ export function updateCategory(id: string, data: Partial<MenuCategory>): MenuCat
   if (!existing) return null;
   const updated = { ...existing, ...data, id };
   categories.set(id, updated);
+  persist();
   return updated;
 }
 
 export function deleteCategory(id: string): boolean {
-  return categories.delete(id);
+  const ok = categories.delete(id);
+  if (!ok) return false;
+  // Cascade: remove menu items that belonged to this category so they don't
+  // leak into the "전체 메뉴" view as orphans.
+  for (const [itemId, item] of menuItems) {
+    if (item.categoryId === id) menuItems.delete(itemId);
+  }
+  persist();
+  return true;
 }
 
 // Menu Items
@@ -160,6 +248,7 @@ export function createMenuItem(data: Omit<MenuItem, 'id'>): MenuItem {
   const id = `item-${Date.now()}`;
   const item: MenuItem = { id, ...data };
   menuItems.set(id, item);
+  persist();
   return item;
 }
 
@@ -168,11 +257,14 @@ export function updateMenuItem(id: string, data: Partial<MenuItem>): MenuItem | 
   if (!existing) return null;
   const updated = { ...existing, ...data, id };
   menuItems.set(id, updated);
+  persist();
   return updated;
 }
 
 export function deleteMenuItem(id: string): boolean {
-  return menuItems.delete(id);
+  const ok = menuItems.delete(id);
+  if (ok) persist();
+  return ok;
 }
 
 // Orders
@@ -197,6 +289,7 @@ export function createOrder(data: { tableNumber: number; items: Order['items'] }
     createdAt: new Date().toISOString(),
   };
   orders.set(id, order);
+  persist();
   return order;
 }
 
@@ -205,6 +298,7 @@ export function updateOrderStatus(id: string, status: Order['status']): Order | 
   if (!existing) return null;
   const updated = { ...existing, status };
   orders.set(id, updated);
+  persist();
   return updated;
 }
 
@@ -215,6 +309,7 @@ export function getTableCount(): number {
 
 export function setTableCount(count: number): number {
   tableCount = count;
+  persist();
   return tableCount;
 }
 
