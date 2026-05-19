@@ -20,8 +20,27 @@ export function formatKRW(price: number): string {
 }
 
 export function formatDateTime(isoString: string): string {
+  // SSR hydration safety: Node's small-icu falls back to English AM/PM for 'ko-KR'
+  // ("PM 09:57"), while the browser's full ICU renders "오후 09:57", causing a
+  // mismatch. Use 'en-US' (baseline in every ICU build) for deterministic parts
+  // and translate the dayPeriod ourselves. Also pin the timezone so server and
+  // client always agree.
   const date = new Date(isoString);
-  return date.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Seoul',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  }).formatToParts(date);
+  let hour = '';
+  let minute = '';
+  let isPM = false;
+  for (const p of parts) {
+    if (p.type === 'hour') hour = p.value;
+    else if (p.type === 'minute') minute = p.value;
+    else if (p.type === 'dayPeriod') isPM = p.value.toUpperCase() === 'PM';
+  }
+  return `${isPM ? '오후' : '오전'} ${hour.padStart(2, '0')}:${minute}`;
 }
 
 export function calculateCartItemTotal(

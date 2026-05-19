@@ -18,7 +18,10 @@ export async function createOrder(data: { tableNumber: number; items: CartItem[]
 }
 
 export async function updateOrderStatus(id: string, status: Order['status']): Promise<Order> {
-  const res = await fetch(`${API_BASE}/orders/${id}`, {
+  // Order IDs use the `#001` format; `#` is the URL fragment delimiter, so it
+  // MUST be percent-encoded or the path collapses to `/api/orders/` and hits
+  // the wrong route handler.
+  const res = await fetch(`${API_BASE}/orders/${encodeURIComponent(id)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ status }),
