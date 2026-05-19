@@ -90,11 +90,15 @@ export function useTableCart(tableNumber: number | null): UseTableCartReturn {
   const addItem = useCallback(
     async (data: Omit<CartItem, 'id' | 'totalPrice'>) => {
       if (tableNumber === null) return;
-      await fetch(`/api/tables/${tableNumber}/cart/items`, {
+      const res = await fetch(`/api/tables/${tableNumber}/cart/items`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...data, clientId }),
       });
+      if (res.ok) {
+        const body = (await res.json()) as { snapshot: TableCartSnapshot };
+        setSnap(body.snapshot);
+      }
     },
     [tableNumber, clientId],
   );
@@ -102,11 +106,17 @@ export function useTableCart(tableNumber: number | null): UseTableCartReturn {
   const updateQuantity = useCallback(
     async (itemId: string, quantity: number) => {
       if (tableNumber === null) return;
-      await fetch(`/api/tables/${tableNumber}/cart/items/${encodeURIComponent(itemId)}`, {
+      const res = await fetch(`/api/tables/${tableNumber}/cart/items/${encodeURIComponent(itemId)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ quantity }),
       });
+      if (res.ok) {
+        const body = (await res.json()) as TableCartSnapshot;
+        if (Array.isArray(body.items) && typeof body.totalCount === 'number') {
+          setSnap(body);
+        }
+      }
     },
     [tableNumber],
   );
@@ -114,9 +124,15 @@ export function useTableCart(tableNumber: number | null): UseTableCartReturn {
   const removeItem = useCallback(
     async (itemId: string) => {
       if (tableNumber === null) return;
-      await fetch(`/api/tables/${tableNumber}/cart/items/${encodeURIComponent(itemId)}`, {
+      const res = await fetch(`/api/tables/${tableNumber}/cart/items/${encodeURIComponent(itemId)}`, {
         method: 'DELETE',
       });
+      if (res.ok) {
+        const body = (await res.json()) as TableCartSnapshot;
+        if (Array.isArray(body.items) && typeof body.totalCount === 'number') {
+          setSnap(body);
+        }
+      }
     },
     [tableNumber],
   );
@@ -134,6 +150,9 @@ export function useTableCart(tableNumber: number | null): UseTableCartReturn {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       return { ok: false, error: data?.error ?? '주문 처리에 실패했습니다' };
+    }
+    if (data.snapshot) {
+      setSnap(data.snapshot as TableCartSnapshot);
     }
     return { ok: true, orderId: data.order.id as string };
   }, [tableNumber, clientId]);
