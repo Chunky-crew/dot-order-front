@@ -71,7 +71,7 @@ export function setTableCount(count: number): number {
   return tableRepository.setTableCount(count);
 }
 
-// ─── Shared table carts (collaborative, host-gated ordering) ─────────────────
+// ─── Shared table carts (collaborative; any device at the table may order) ───
 export function getTableCart(tableNumber: number): TableCartSnapshot {
   return cartRepository.getCart(tableNumber);
 }
@@ -82,8 +82,13 @@ export function joinTableCart(
 ): TableCartSnapshot {
   return cartRepository.joinCart(tableNumber, clientId, hostHasActiveConnection);
 }
-export function leaveTableCart(tableNumber: number, clientId: string): void {
-  cartRepository.leaveCart(tableNumber, clientId);
+export function handleClientDisconnect(
+  tableNumber: number,
+  clientId: string,
+  hostStillConnected: () => boolean,
+  pickSuccessor: () => string | null,
+): TableCartSnapshot {
+  return cartRepository.handleDisconnect(tableNumber, clientId, hostStillConnected, pickSuccessor);
 }
 export function addCartItemServer(
   tableNumber: number,
@@ -108,10 +113,10 @@ export function removeCartItemServer(
 
 export type PlaceOrderResult =
   | { ok: true; order: Order; snap: TableCartSnapshot }
-  | { ok: false; error: 'empty' | 'forbidden' | 'no-host' };
+  | { ok: false; error: 'empty' };
 
-export function placeTableOrder(tableNumber: number, clientId: string): PlaceOrderResult {
-  const taken = cartRepository.takeOrderItems(tableNumber, clientId);
+export function placeTableOrder(tableNumber: number): PlaceOrderResult {
+  const taken = cartRepository.takeOrderItems(tableNumber);
   if (!taken.ok) return { ok: false, error: taken.error };
   const order = orderRepository.createOrder({ tableNumber, items: taken.items });
   return { ok: true, order, snap: taken.snap };

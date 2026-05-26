@@ -3,7 +3,7 @@ import { placeTableOrder } from '@/lib/server/store';
 import { broadcast } from '@/lib/server/cartBus';
 
 export async function POST(
-  request: NextRequest,
+  _request: NextRequest,
   { params }: { params: Promise<{ tableNumber: string }> },
 ) {
   const { tableNumber } = await params;
@@ -12,23 +12,14 @@ export async function POST(
     return NextResponse.json({ error: '유효한 테이블 번호가 아닙니다' }, { status: 400 });
   }
 
-  const body = await request.json().catch(() => ({}));
-  const clientId = typeof body?.clientId === 'string' ? body.clientId : '';
-  if (!clientId) {
-    return NextResponse.json({ error: 'clientId가 필요합니다' }, { status: 400 });
-  }
-
-  const result = placeTableOrder(n, clientId);
+  // Any client at the table may place the order — no host check.
+  const result = placeTableOrder(n);
   if (!result.ok) {
-    if (result.error === 'empty') {
-      return NextResponse.json({ error: '장바구니가 비어있습니다' }, { status: 400 });
-    }
-    if (result.error === 'no-host') {
-      return NextResponse.json({ error: '호스트가 지정되지 않았습니다' }, { status: 409 });
-    }
+    // Only 'empty' is possible: either the cart really is empty, or another
+    // person at the table just confirmed it (atomic drain).
     return NextResponse.json(
-      { error: '주문은 호스트(첫 접속자)만 가능합니다' },
-      { status: 403 },
+      { error: '이미 주문이 접수되었거나 장바구니가 비어 있습니다', code: 'cart-empty' },
+      { status: 409 },
     );
   }
 

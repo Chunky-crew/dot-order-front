@@ -134,16 +134,24 @@ interface TableRepository {
 interface CartRepository {
   getCart(tableNumber: number): TableCartSnapshot;
   joinCart(tableNumber: number, clientId: string, hostHasActiveConnection: () => boolean): TableCartSnapshot;
-  leaveCart(tableNumber: number, clientId: string): void;
+  // 호스트 이탈 시 자동 승계: hostStillConnected()=false면 pickSuccessor()(최고참)로 호스트 이양,
+  // 남은 사람이 없으면 호스트 해제. 결과 snapshot을 반환해 caller가 broadcast 한다.
+  handleDisconnect(
+    tableNumber: number,
+    clientId: string,
+    hostStillConnected: () => boolean,
+    pickSuccessor: () => string | null,
+  ): TableCartSnapshot;
   addItem(tableNumber: number, data: Omit<CartItem, 'id' | 'totalPrice'>, clientId?: string): { item: CartItem; snap: TableCartSnapshot };
   updateItemQuantity(tableNumber: number, itemId: string, quantity: number): TableCartSnapshot | null;
   removeItem(tableNumber: number, itemId: string): TableCartSnapshot | null;
-  takeOrderItems(tableNumber: number, clientId: string): TakeOrderItemsResult;
+  // 누구나 주문 가능: 호스트 검증 없이 빈 장바구니만 확인 후 drain.
+  takeOrderItems(tableNumber: number): TakeOrderItemsResult;
 }
 ```
 
-**Invariant:** `takeOrderItems`는 호스트 검증 + 빈 장바구니 검증 + drain을 **원자적**으로 처리해야 한다.
-JSON 구현에서는 동기 함수 내에서 처리되지만, DB 구현에서는 명시적 트랜잭션이 필요하다.
+**Invariant:** `takeOrderItems`는 빈 장바구니 검증 + drain을 **원자적**으로 처리해야 한다.
+이 원자성이 중복 주문 방지의 유일한 장치다(호스트 게이팅 없음). JSON 구현에서는 동기 함수 내에서 처리되지만, DB 구현에서는 명시적 트랜잭션(예: `SELECT ... FOR UPDATE` 후 삭제)이 필요하다.
 
 ---
 

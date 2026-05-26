@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
-import { getTableCart, joinTableCart, leaveTableCart } from '@/lib/server/store';
-import { broadcast, isClientConnected, subscribe } from '@/lib/server/cartBus';
+import { joinTableCart, handleClientDisconnect } from '@/lib/server/store';
+import { broadcast, getOldestClientId, isClientConnected, subscribe } from '@/lib/server/cartBus';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -27,9 +27,40 @@ export async function GET(
   let cleaned = false;
   let heartbeat: ReturnType<typeof setInterval> | null = null;
   let unsubscribe: (() => void) | null = null;
+  let controllerRef: ReadableStreamDefaultController<Uint8Array> | null = null;
+
+  // Shared teardown for both request-abort and stream-cancel. Removing this
+  // subscriber FIRST means the failover check sees an accurate picture: if this
+  // was the host's only connection, `isClientConnected` is false and the role is
+  // handed to the longest-present remaining client (auto-succession).
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    if (heartbeat) clearInterval(heartbeat);
+    unsubscribe?.();
+    const snap = handleClientDisconnect(
+      n,
+      clientId,
+      () => isClientConnected(n, clientId),
+      () => getOldestClientId(n, clientId),
+    );
+    // Tell the remaining subscribers (incl. any newly-promoted host) so their
+    // UI updates — the new host's order button activates immediately.
+    try {
+      broadcast(n, 'snapshot', JSON.stringify(snap));
+    } catch {
+      // table may have no remaining subscribers
+    }
+    try {
+      controllerRef?.close();
+    } catch {
+      // already closed
+    }
+  };
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
+      controllerRef = controller;
       const send = (event: string, data: string) => {
         if (cleaned) return;
         try {
@@ -52,33 +83,10 @@ export async function GET(
         send('heartbeat', JSON.stringify({ t: Date.now() }));
       }, HEARTBEAT_MS);
 
-      const cleanup = () => {
-        if (cleaned) return;
-        cleaned = true;
-        if (heartbeat) clearInterval(heartbeat);
-        unsubscribe?.();
-        leaveTableCart(n, clientId);
-        // Notify remaining subscribers — host may have just gone idle (grace timer started).
-        try {
-          broadcast(n, 'snapshot', JSON.stringify(getTableCart(n)));
-        } catch {
-          // table may have no remaining subscribers
-        }
-        try {
-          controller.close();
-        } catch {
-          // already closed
-        }
-      };
-
       request.signal.addEventListener('abort', cleanup);
     },
     cancel() {
-      if (cleaned) return;
-      cleaned = true;
-      if (heartbeat) clearInterval(heartbeat);
-      unsubscribe?.();
-      leaveTableCart(n, clientId);
+      cleanup();
     },
   });
 

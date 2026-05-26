@@ -444,19 +444,11 @@ export default function OrderMenuClient({ tableNumberStr, initialCategories, ini
         </button>
       </div>
 
-      {/* Host indicator (always visible once SSE has connected) */}
+      {/* Shared cart note (visible once SSE has connected) */}
       {cart.ready && (
         <div className="px-4 pt-3">
-          <div
-            className={`text-xs rounded-lg px-3 py-2 border ${
-              cart.isHost
-                ? 'bg-maroon-50 border-maroon-200 text-maroon-800'
-                : 'bg-muted border-border text-muted-foreground'
-            }`}
-          >
-            {cart.isHost
-              ? '이 기기가 호스트입니다 — 주문 확정은 여기서만 가능합니다.'
-              : '같은 테이블의 다른 기기가 호스트입니다. 메뉴 추가/수정은 자유롭게 가능하지만 주문 확정은 호스트가 진행합니다.'}
+          <div className="text-xs rounded-lg px-3 py-2 border bg-maroon-50 border-maroon-200 text-maroon-800">
+            같은 테이블에서 함께 담는 장바구니예요. 메뉴 추가·주문 모두 누구나 할 수 있습니다.
           </div>
         </div>
       )}

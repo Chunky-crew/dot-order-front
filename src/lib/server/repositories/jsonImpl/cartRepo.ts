@@ -64,14 +64,38 @@ export class JsonCartRepository implements CartRepository {
     return result;
   }
 
-  leaveCart(tableNumber: number, clientId: string): void {
+  handleDisconnect(
+    tableNumber: number,
+    clientId: string,
+    hostStillConnected: () => boolean,
+    pickSuccessor: () => string | null,
+  ): TableCartSnapshot {
+    let result!: TableCartSnapshot;
     db.mutate((s) => {
       const cart = s.tableCarts.find((c) => c.tableNumber === tableNumber);
-      if (!cart) return;
-      if (cart.hostClientId === clientId) {
-        cart.hostLastSeen = Date.now();
+      if (!cart) {
+        result = emptySnapshot(tableNumber);
+        return;
       }
+      // Only the host's departure can change who controls checkout.
+      if (cart.hostClientId === clientId) {
+        const now = Date.now();
+        if (hostStillConnected()) {
+          // Host has another live connection (e.g. a second tab) — keep the role.
+          cart.hostLastSeen = now;
+        } else {
+          // Auto-succession: promote the longest-present remaining client so the
+          // table can keep ordering. If nobody is left, release the role (null)
+          // so the next person to connect claims it without waiting out the grace.
+          const successor = pickSuccessor();
+          cart.hostClientId = successor;
+          cart.hostLastSeen = successor ? now : 0;
+          cart.version++;
+        }
+      }
+      result = snapshot(cart);
     });
+    return result;
   }
 
   addItem(
@@ -132,20 +156,16 @@ export class JsonCartRepository implements CartRepository {
     return result;
   }
 
-  takeOrderItems(tableNumber: number, clientId: string): PlaceCartOrderResult {
+  takeOrderItems(tableNumber: number): PlaceCartOrderResult {
     let result: PlaceCartOrderResult = { ok: false, error: 'empty' };
     db.mutate((s) => {
       const cart = getOrCreateCart(s, tableNumber);
+      // Anyone at the table may confirm the order. The only guard is a non-empty
+      // cart; because the drain below runs inside a single synchronous mutate,
+      // a second concurrent "주문하기" tap finds the cart already empty and gets
+      // the friendly empty response — no duplicate orders, no host gate.
       if (cart.items.length === 0) {
         result = { ok: false, error: 'empty' };
-        return;
-      }
-      if (cart.hostClientId === null) {
-        result = { ok: false, error: 'no-host' };
-        return;
-      }
-      if (cart.hostClientId !== clientId) {
-        result = { ok: false, error: 'forbidden' };
         return;
       }
       const drainedItems = cart.items.map((it) => ({
@@ -153,8 +173,6 @@ export class JsonCartRepository implements CartRepository {
         selectedOptions: [...it.selectedOptions],
       }));
       cart.items = [];
-      cart.hostClientId = null;
-      cart.hostLastSeen = 0;
       cart.version++;
       result = { ok: true, items: drainedItems, snap: snapshot(cart) };
     });

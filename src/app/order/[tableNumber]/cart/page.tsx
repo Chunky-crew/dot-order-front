@@ -112,17 +112,9 @@ export default function CartPage() {
           </span>
         </div>
 
-        {/* Host status banner */}
-        <div
-          className={`mx-4 mt-3 rounded-lg border px-3 py-2 text-xs ${
-            cart.isHost
-              ? 'bg-maroon-50 border-maroon-200 text-maroon-800'
-              : 'bg-muted border-border text-muted-foreground'
-          }`}
-        >
-          {cart.isHost
-            ? '이 기기가 호스트입니다 — 주문 확정은 이 기기에서만 가능합니다.'
-            : '주문 확정은 호스트(첫 접속 기기)만 가능합니다. 메뉴 추가/수량 변경/삭제는 자유롭게 하실 수 있어요.'}
+        {/* Shared cart note */}
+        <div className="mx-4 mt-3 rounded-lg border border-maroon-200 bg-maroon-50 px-3 py-2 text-xs text-maroon-800">
+          같은 테이블에서 함께 담는 장바구니예요. 누구나 주문을 확정할 수 있습니다.
         </div>
 
         {/* Cart items */}
@@ -212,28 +204,22 @@ export default function CartPage() {
         </div>
       </div>
 
-      {/* Fixed order button — host only */}
+      {/* Fixed order button — available to anyone at the table */}
       <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-lg px-4 pb-safe-bottom bg-white border-t border-border pt-3 pb-4 z-30">
-        {cart.isHost ? (
-          <button
-            onClick={() => setShowConfirm(true)}
-            disabled={isOrdering || items.length === 0}
-            className="w-full h-14 rounded-xl bg-maroon-800 text-white font-bold text-lg flex items-center justify-center gap-2 shadow-lg active:bg-maroon-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {isOrdering ? (
-              <>
-                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                <span>주문 처리 중...</span>
-              </>
-            ) : (
-              <span>{formatKRW(totalPrice)} 주문하기</span>
-            )}
-          </button>
-        ) : (
-          <div className="w-full h-14 rounded-xl bg-muted text-muted-foreground font-medium text-sm flex items-center justify-center text-center px-3">
-            주문 확정은 호스트(첫 접속 기기)에서만 가능합니다.
-          </div>
-        )}
+        <button
+          onClick={() => setShowConfirm(true)}
+          disabled={isOrdering || items.length === 0}
+          className="w-full h-14 rounded-xl bg-maroon-800 text-white font-bold text-lg flex items-center justify-center gap-2 shadow-lg active:bg-maroon-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {isOrdering ? (
+            <>
+              <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              <span>주문 처리 중...</span>
+            </>
+          ) : (
+            <span>{formatKRW(totalPrice)} 주문하기</span>
+          )}
+        </button>
       </div>
 
       {/* Order confirmation modal */}

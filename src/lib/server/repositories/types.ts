@@ -32,12 +32,24 @@ export interface TableRepository {
 
 export type PlaceCartOrderResult =
   | { ok: true; snap: TableCartSnapshot; items: CartItem[] }
-  | { ok: false; error: 'empty' | 'forbidden' | 'no-host' };
+  | { ok: false; error: 'empty' };
 
 export interface CartRepository {
   getCart(tableNumber: number): TableCartSnapshot;
   joinCart(tableNumber: number, clientId: string, hostHasActiveConnection: () => boolean): TableCartSnapshot;
-  leaveCart(tableNumber: number, clientId: string): void;
+  /**
+   * Handle a client's disconnect. If the leaving client is the current host and
+   * has no other live connection, the host role automatically transfers to
+   * `pickSuccessor()` (the longest-present remaining client); if nobody remains,
+   * the role is released so the next person to connect claims it instantly.
+   * Returns the resulting snapshot for the caller to broadcast.
+   */
+  handleDisconnect(
+    tableNumber: number,
+    clientId: string,
+    hostStillConnected: () => boolean,
+    pickSuccessor: () => string | null,
+  ): TableCartSnapshot;
   addItem(
     tableNumber: number,
     data: Omit<CartItem, 'id' | 'totalPrice'>,
@@ -45,6 +57,10 @@ export interface CartRepository {
   ): { item: CartItem; snap: TableCartSnapshot };
   updateItemQuantity(tableNumber: number, itemId: string, quantity: number): TableCartSnapshot | null;
   removeItem(tableNumber: number, itemId: string): TableCartSnapshot | null;
-  /** Validates host + non-empty, drains the cart, returns items for the caller to create an Order from. */
-  takeOrderItems(tableNumber: number, clientId: string): PlaceCartOrderResult;
+  /**
+   * Validates the cart is non-empty, then drains it and returns the items for
+   * the caller to create an Order from. Any client at the table may order — the
+   * atomic drain means a second concurrent attempt simply finds an empty cart.
+   */
+  takeOrderItems(tableNumber: number): PlaceCartOrderResult;
 }

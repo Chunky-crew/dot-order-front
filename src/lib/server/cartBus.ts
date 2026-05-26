@@ -38,6 +38,22 @@ export function isClientConnected(tableNumber: number, clientId: string): boolea
   return false;
 }
 
+/**
+ * Returns the clientId of the longest-present still-connected subscriber for
+ * the table (a Set preserves insertion order, so the first entry is the oldest),
+ * or null if no one is connected. Used to promote a successor host when the
+ * current host disconnects. Pass `exclude` to skip a clientId (e.g. the one that
+ * is mid-cleanup but not yet unsubscribed).
+ */
+export function getOldestClientId(tableNumber: number, exclude?: string): string | null {
+  const set = subscribers.get(tableNumber);
+  if (!set) return null;
+  for (const s of set) {
+    if (s.clientId !== exclude) return s.clientId;
+  }
+  return null;
+}
+
 export function broadcast(tableNumber: number, event: string, data: string): void {
   const set = subscribers.get(tableNumber);
   if (!set) return;

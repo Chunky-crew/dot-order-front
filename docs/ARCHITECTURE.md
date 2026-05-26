@@ -77,7 +77,7 @@ src/lib/server/repositories/index.ts  (Repository 인스턴스 export)
 
 - `cartBus`는 **인메모리 pub/sub**이다. `store.json`에 저장되지 않으며, 서버 재시작 시 구독자 목록이 초기화된다.
 - 클라이언트는 `src/app/api/tables/[tableNumber]/cart/stream/route.ts`로 GET 요청을 보내 SSE 스트림을 구독한다.
-- 해당 route handler는 연결 맵을 직접 관리하며, `joinTableCart` / `leaveTableCart` 호출 시 `hostHasActiveConnection` 콜백을 주입한다.
+- 해당 route handler는 연결 맵을 직접 관리하며, `joinTableCart` / `handleClientDisconnect` 호출 시 `hostHasActiveConnection`·`pickSuccessor` 콜백을 주입한다.
 
 ```
 클라이언트 GET /api/tables/1/cart/stream
@@ -90,30 +90,21 @@ src/lib/server/repositories/index.ts  (Repository 인스턴스 export)
 
 ---
 
-## 호스트 선출
+## 주문 권한 (호스트 개념 폐기)
 
-테이블마다 **단 한 명의 호스트**만 주문 확정(`placeTableOrder`)을 호출할 수 있다.
+**테이블의 어떤 기기든 주문을 확정**할 수 있다. 과거에는 "단 한 명의 호스트"만 주문할 수 있게 게이팅했으나, 호스트 이탈 감지(SSE 끊김)가 신뢰성이 낮아 호스트가 박제되는 문제가 있었다. 그래서 호스트 게이팅을 폐기했다.
 
-| 상수 | 값 |
-|---|---|
-| `HOST_GRACE_MS` | 30,000 ms (30초) |
-
-**선출 흐름:**
-
-1. **join**: 테이블에 호스트가 없으면 → 즉시 호스트 승계.
-2. **join (호스트 있음)**: `hostHasActiveConnection()` 이 `false` **이고** `hostLastSeen`이 30초 이상 경과 → stale 판정, 호스트 교체.
-3. **leave**: 호스트가 SSE 스트림을 끊으면 → `hostLastSeen = Date.now()` 업데이트 (타이머 시작).
-4. **takeOver**: grace 기간이 지난 뒤 새 클라이언트가 join하면 호스트 승계.
+- 중복 주문 방지는 **호스트가 아니라 원자적 drain**으로 보장한다. `takeOrderItems`가 동기 `db.mutate` 안에서 장바구니를 비우므로, 거의 동시에 두 명이 "주문하기"를 눌러도 먼저 처리된 쪽만 주문이 생성되고 나머지는 빈 장바구니(`empty`)를 만나 친화적 안내(409)를 받는다.
+- `hostClientId`/`hostLastSeen` 필드와 `joinCart`의 SSE 연결 추적은 남아 있으나 **주문을 게이팅하지 않는다**(정보성).
 
 ---
 
 ## 주문 흐름
 
-`store.ts`의 `placeTableOrder(tableNumber, clientId)` 파이프라인:
+`store.ts`의 `placeTableOrder(tableNumber)` 파이프라인:
 
 ```
-1. cartRepository.takeOrderItems(tableNumber, clientId)
-   ├─ 호스트 검증 (forbidden / no-host)
+1. cartRepository.takeOrderItems(tableNumber)
    ├─ 빈 장바구니 검증 (empty)
    └─ 장바구니 drain → { ok: true, items, snap }
 

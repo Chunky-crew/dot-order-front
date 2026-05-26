@@ -30,9 +30,10 @@ export interface UseTableCartReturn {
 }
 
 /**
- * Subscribes to the table's shared cart via Server-Sent Events.
- * The first SSE-connected clientId becomes the "host" — only the host
- * may place the order. Anyone may add/update/remove items.
+ * Subscribes to the table's shared cart via Server-Sent Events. Every device at
+ * the table sees the same cart and any of them may add/update/remove items and
+ * place the order. (`hostClientId`/`isHost` are retained as informational SSE
+ * state but no longer gate ordering.)
  */
 export function useTableCart(tableNumber: number | null): UseTableCartReturn {
   const [clientId, setClientId] = useState<string>('');
