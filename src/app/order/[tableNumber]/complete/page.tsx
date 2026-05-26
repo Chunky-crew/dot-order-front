@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { Fragment, useEffect, useState, useCallback } from 'react';
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import { getOrders } from '@/lib/api/orders';
 import { formatKRW, formatDateTime } from '@/lib/utils';
@@ -126,10 +126,19 @@ export default function OrderCompletePage() {
             {STATUS_STEPS.map((step, index) => {
               const isCompleted = index <= currentStepIndex;
               const isActive = index === currentStepIndex;
-              const isLast = index === STATUS_STEPS.length - 1;
 
               return (
-                <div key={step.key} className="flex items-center flex-1">
+                <Fragment key={step.key}>
+                  {/* Connector lives between steps as a direct flex-1 child, so the
+                      steps spread evenly edge-to-edge (first at the left, last at the
+                      right, middle centered) instead of bunching to the left. */}
+                  {index > 0 && (
+                    <div
+                      className={`flex-1 h-1 mx-1 rounded-full transition-colors ${
+                        index <= currentStepIndex ? 'bg-green-500' : 'bg-gray-200'
+                      }`}
+                    />
+                  )}
                   <div className="flex flex-col items-center gap-1.5 flex-shrink-0">
                     <div
                       className={`w-9 h-9 rounded-full flex items-center justify-center transition-colors ${
@@ -154,14 +163,7 @@ export default function OrderCompletePage() {
                       {step.label}
                     </span>
                   </div>
-                  {!isLast && (
-                    <div
-                      className={`flex-1 h-1 mx-1 rounded-full transition-colors ${
-                        index < currentStepIndex ? 'bg-green-500' : 'bg-gray-200'
-                      }`}
-                    />
-                  )}
-                </div>
+                </Fragment>
               );
             })}
           </div>
