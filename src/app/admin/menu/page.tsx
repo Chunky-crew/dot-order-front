@@ -7,8 +7,8 @@ import type { Area } from 'react-easy-crop';
 
 // ─── Image processing ────────────────────────────────────────────────────────
 
-const MAX_IMAGE_DIMENSION = 800;
-const IMAGE_QUALITY = 0.85;
+const MAX_IMAGE_DIMENSION = 500;
+const IMAGE_QUALITY = 0.65;
 
 async function readImageAsDataURL(file: File): Promise<string> {
   if (!file.type.startsWith('image/')) {

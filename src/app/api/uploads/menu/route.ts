@@ -52,5 +52,5 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Failed to save image' }, { status: 500 });
   }
 
-  return NextResponse.json({ url: `/uploads/menu/${filename}` });
+  return NextResponse.json({ url: `/api/uploads/menu/${filename}` });
 }
