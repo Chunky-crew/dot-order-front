@@ -62,6 +62,9 @@ export function createOrder(data: { tableNumber: number; items: Order['items'] }
 export function updateOrderStatus(id: string, status: Order['status']): Order | null {
   return orderRepository.updateOrderStatus(id, status);
 }
+export function deleteOrder(id: string): boolean {
+  return orderRepository.deleteOrder(id);
+}
 
 // ─── Tables ──────────────────────────────────────────────────────────────────
 export function getTableCount(): number {

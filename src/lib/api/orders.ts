@@ -28,3 +28,11 @@ export async function updateOrderStatus(id: string, status: Order['status']): Pr
   });
   return res.json();
 }
+
+export async function deleteOrder(id: string): Promise<void> {
+  // Same `#`-encoding requirement as updateOrderStatus above.
+  const res = await fetch(`${API_BASE}/orders/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error('주문 삭제 실패');
+}

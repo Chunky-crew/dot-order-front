@@ -42,4 +42,14 @@ export class JsonOrderRepository implements OrderRepository {
     });
     return updated;
   }
+
+  deleteOrder(id: string): boolean {
+    let removed = false;
+    db.mutate((s) => {
+      const before = s.orders.length;
+      s.orders = s.orders.filter((o) => o.id !== id);
+      removed = s.orders.length !== before;
+    });
+    return removed;
+  }
 }

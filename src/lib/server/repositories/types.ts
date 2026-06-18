@@ -23,6 +23,7 @@ export interface OrderRepository {
   getAllOrders(status?: string): Order[];
   createOrder(data: { tableNumber: number; items: Order['items'] }): Order;
   updateOrderStatus(id: string, status: Order['status']): Order | null;
+  deleteOrder(id: string): boolean;
 }
 
 export interface TableRepository {

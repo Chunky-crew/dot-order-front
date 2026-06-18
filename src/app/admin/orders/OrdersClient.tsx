@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Order } from '@/types';
-import { getOrders, updateOrderStatus } from '@/lib/api/orders';
+import { getOrders, updateOrderStatus, deleteOrder } from '@/lib/api/orders';
 import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
 import { formatKRW, formatDateTime } from '@/lib/utils';
@@ -78,6 +78,24 @@ export default function OrdersClient({ initialOrders }: OrdersClientProps) {
       setOrders((prev) => prev.map((o) => (o.id === updated.id ? updated : o)));
     } catch (err) {
       console.error('상태 변경 실패:', err);
+    } finally {
+      setUpdatingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(order.id);
+        return next;
+      });
+    }
+  };
+
+  const handleDelete = async (order: Order) => {
+    if (!window.confirm(`주문 ${order.id}을(를) 삭제할까요? 되돌릴 수 없습니다.`)) return;
+    setUpdatingIds((prev) => new Set([...prev, order.id]));
+    try {
+      await deleteOrder(order.id);
+      setOrders((prev) => prev.filter((o) => o.id !== order.id));
+      prevOrderIdsRef.current.delete(order.id);
+    } catch (err) {
+      console.error('주문 삭제 실패:', err);
     } finally {
       setUpdatingIds((prev) => {
         const next = new Set(prev);
@@ -187,7 +205,16 @@ export default function OrdersClient({ initialOrders }: OrdersClientProps) {
                         테이블 {order.tableNumber}번 &middot; {formatDateTime(order.createdAt)}
                       </p>
                     </div>
-                    <Badge variant={order.status}>{STATUS_LABEL[order.status]}</Badge>
+                    <div className="flex flex-col items-end gap-1.5 shrink-0">
+                      <Badge variant={order.status}>{STATUS_LABEL[order.status]}</Badge>
+                      <button
+                        onClick={() => handleDelete(order)}
+                        disabled={isUpdating}
+                        className="text-xs text-gray-400 hover:text-red-600 transition-colors disabled:opacity-50 focus:outline-none"
+                      >
+                        삭제
+                      </button>
+                    </div>
                   </div>
 
                   {/* Item list */}
